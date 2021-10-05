@@ -1,3 +1,4 @@
 # Usage
 
-Run symfony console app:import /path/to/file.csv --execute
+Run symfony console app:import stock.csv --execute
+
