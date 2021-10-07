@@ -96,7 +96,7 @@ class CsvImportTest extends KernelTestcase
 
         $output = $tester->getDisplay();
 
-        $this->assertStringContainsString('Rows proccessed: ' . $this->countRows($this->genegerateTestCsvData(), true), $output);
+        $this->assertStringContainsString('Rows processed: ' . $this->countRows($this->genegerateTestCsvData(), true), $output);
         $this->assertStringContainsString('Valid rows: ' . $this->countRows($this->getValidRows()), $output);
         $this->assertStringContainsString('Incorrect rows: ' . $this->countRows($this->getIncorrectRows()), $output);
         $this->assertStringContainsString('Skipped rows: ' . $this->countRows($this->getRowsThatShouldBeSkipped()), $output);

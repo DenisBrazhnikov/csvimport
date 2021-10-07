@@ -11,17 +11,11 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-use Symfony\Component\HttpKernel\KernelInterface;
-
-use Doctrine\ORM\EntityManagerInterface;
-
 use Symfony\Component\Validator\Constraints as Assert;
-use Symfony\Component\Validator\Validation;
-use Symfony\Component\Validator\Validator\RecursiveValidator;
 
-use Symfony\Component\Serializer\Encoder\CsvEncoder;
-use Symfony\Component\Serializer\Serializer;
-use Symfony\Component\Serializer\Normalizer\ObjectNormalizer;
+use App\Service\CsvImport\CsvParser;
+use App\Service\CsvImport\RowsValidator;
+use App\Service\CsvImport\Strategy\DBImport;
 
 use Symfony\Component\Stopwatch\Stopwatch;
 
@@ -31,16 +25,17 @@ use Symfony\Component\Stopwatch\Stopwatch;
 )]
 class CsvImport extends Command
 {
-    private $io;
-    private $em;
-    private RecursiveValidator $validator;
+    private $csvParser;
+    private $rowsValidator;
+    private $dbImport;
 
-    public function __construct(KernelInterface $kernel, EntityManagerInterface $em)
+    public function __construct(CsvParser $csvParser, RowsValidator $rowsValidator, DBImport $dbImport)
     {
         parent::__construct();
 
-        $this->validator = Validation::createValidator();
-        $this->em = $em;
+        $this->csvParser = $csvParser;
+        $this->rowsValidator = $rowsValidator;
+        $this->dbImport = $dbImport;
     }
 
     protected function configure(): void
@@ -72,56 +67,41 @@ class CsvImport extends Command
 
         $io->text('Reading CSV data...');
         
-        $records = $this->readCsvFile($filePath);
+        $rows = $this->csvParser->serializeFile($filePath);
 
-        $io->text(count($records) . ' rows detected. Validating CSV data...');
+        $io->text(count($rows) . ' rows detected. Validating CSV data...');
 
-        $rowsCount = 0;
-        $validRowsCount = 0;
-        $validRows = [];
-        $incorrectRowsCount = 0;
-        $incorrectRows = [];
-        $skippedRowsCount = 0;
-        $skippedRows = [];
         $headers = array_keys($this->rowValidationRules());
 
-        foreach ($records as $row) {
-            $rowsCount++;
-            $skipRow = false;
+        $validatorResult = $this->rowsValidator->validate($rows, $this->rowValidationRules(), function ($row) {
+            if($row['Cost in GBP'] < 5 && $row['Stock'] < 10)
+                return true;
+    
+            if($row['Cost in GBP'] >= 1000)
+                return true;
+    
+            return false;
+        });
 
-            if($this->rowIsValid($row))
-                if($this->rowShouldBeSkipped($row)) {
-                    $skippedRows[] = $row;
-                    $skippedRowsCount++;
-                } else {
-                    $validRows[] = $row;
-                    $validRowsCount++;
-                }
-            else {
-                $incorrectRows[] = $row;
-                $incorrectRowsCount++;
-            }
-        }
+        $io->text('Rows processed: ' . $validatorResult->getRowsProcessedCount());
+        $io->text('Valid rows: ' . $validatorResult->getValidRowsCount());
+        $io->text('Incorrect rows: ' . $validatorResult->getIncorrectRowsCount());
+        $io->text('Skipped rows: ' . $validatorResult->getSkippedRowsCount());
 
-        $io->text('Rows proccessed: ' . $rowsCount);
-        $io->text('Valid rows: ' . $validRowsCount);
-        $io->text('Incorrect rows: ' . $incorrectRowsCount);
-        $io->text('Skipped rows: ' . $skippedRowsCount);
-
-        if($skippedRowsCount == $rowsCount) {
-            $io->caution('All lines are incorrect. Probably the whole CSV file is broken');
+        if(!$validatorResult->getValidRowsCount()) {
+            $io->caution('CSV file is broken');
 
             return Command::FAILURE;
         }
 
-        if($incorrectRowsCount) {
-            $io->section('Incorrect rows (' . $incorrectRowsCount . ')');
-            $io->table($headers, $incorrectRows);
+        if($validatorResult->getIncorrectRowsCount()) {
+            $io->section('Incorrect rows (' . $validatorResult->getIncorrectRowsCount() . ')');
+            $io->table($headers, $validatorResult->getIncorrectRows());
         }
 
-        if($skippedRowsCount) {
-            $io->section('Skipped rows (' . $skippedRowsCount . ')');
-            $io->table($headers, $skippedRows);
+        if($validatorResult->getSkippedRowsCount()) {
+            $io->section('Skipped rows (' . $validatorResult->getSkippedRowsCount() . ')');
+            $io->table($headers, $validatorResult->getSkippedRows());
         }
 
         if ($input->getOption('execute')) {
@@ -135,15 +115,13 @@ class CsvImport extends Command
             
             $io->section('Inserting valid data to database...');
 
-            $failedRows = $this->insertRowsToDatabase($validRows);
+            $importResult = $this->dbImport->insert('each', $validatorResult->getValidRows());
 
             $io->success('Data has been inserted/updated to database');
 
-            $failedRowsCount = count($failedRows);
-
-            if($failedRowsCount) {
-                $io->section('Failed rows (' . $failedRowsCount . ')');
-                $io->table($headers, $failedRows);
+            if($importResult->getFailedRowsCount()) {
+                $io->section('Failed rows (' . $importResult->getFailedRowsCount() . ')');
+                $io->table($headers, $importResult->getFailedRows());
             }
         }
 
@@ -164,18 +142,6 @@ class CsvImport extends Command
 
         $command = $this->getApplication()->find('doctrine:migrations:migrate');
         $command->run($input, $output);
-    }
-
-    /**
-     * Read CSV and return an array of data rows
-     * @param string $filePath path to CSV file
-     * @return array CSV rows
-     */
-    private function readCsvFile(string $filePath): array
-    {
-        $serializer = new Serializer([new ObjectNormalizer], [new CsvEncoder]);
-        
-        return $serializer->decode(file_get_contents($filePath), 'csv');
     }
 
     /**
@@ -212,96 +178,5 @@ class CsvImport extends Command
             ], 
             'Discontinued' => new Assert\Choice(['yes', '']),
         ];
-    }
-
-    /**
-     * Determines does a specific row meet validation rules
-     * @param array $row Row columns
-     * @return bool
-     */
-    private function rowIsValid(array $row):bool
-    {
-        $validationRules = $this->rowValidationRules();
-
-        foreach($validationRules as $key => $rule) {
-            if(!isset($row[$key]))
-                return false;
-            
-            if($this->validator->validate($row[$key], $rule)->count())
-                return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Determines does a specific row should be skipped based on a supplier needs
-     * @param array $row Row columns
-     * @return bool
-     */
-    private function rowShouldBeSkipped(array $row): bool
-    {
-        if($row['Cost in GBP'] < 5 && $row['Stock'] < 10)
-            return true;
-
-        if($row['Cost in GBP'] >= 1000)
-            return true;
-
-        return false;
-    }
-
-    /**
-     * Inserts array of valid rows to database
-     * @param array $rows Rows
-     * @return array An array of rows that have faild MySQL insert
-     */
-    private function insertRowsToDatabase(array $rows):array
-    {
-        $connection = $this->em->getConnection();
-
-        $statement = $connection->prepare('INSERT INTO tblProductData (
-            strProductCode,
-            strProductName,
-            strProductDesc,
-            intStock,
-            decCost,
-            dtmAdded,
-            dtmDiscontinued
-        ) VALUES (
-            :code,
-            :name,
-            :description,
-            :stock,
-            :cost,
-            NOW(),
-            :discontinued_at
-        ) ON DUPLICATE KEY UPDATE
-            strProductName = :name,
-            strProductDesc = :description,
-            intStock = :stock,
-            decCost = :cost,
-            dtmDiscontinued = :discontinued_at
-        ');
-
-        $failedRows = [];
-
-        foreach($rows as $row) {
-            try {
-                $statement->bindValue(':code', $row['Product Code']);
-                $statement->bindValue(':name', $row['Product Name']);
-                $statement->bindValue(':description', $row['Product Description']);
-                $statement->bindValue(':stock', $row['Stock']);
-                $statement->bindValue(':cost', $row['Cost in GBP']);
-
-                // Set current datetime if the row is discontinued
-                $statement->bindValue(':discontinued_at', $row['Discontinued'] ? date('Y-m-d H:i:s') : NULL);
-
-                $statement->execute();
-            } catch (\Exception $e) {
-                $failedRows[] = $row;
-            }
-        }
-
-        return $failedRows;
     }
 }

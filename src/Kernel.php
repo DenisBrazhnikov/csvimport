@@ -7,6 +7,10 @@ use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigura
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 use Symfony\Component\Routing\Loader\Configurator\RoutingConfigurator;
 
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+
+use App\Service\CsvImport\Strategy\DBImportCompilerPass;
+
 class Kernel extends BaseKernel
 {
     use MicroKernelTrait;
@@ -34,5 +38,10 @@ class Kernel extends BaseKernel
         } else {
             $routes->import('../config/{routes}.php');
         }
+    }
+
+    protected function build(ContainerBuilder $container): void
+    {
+        $container->addCompilerPass(new DBImportCompilerPass());
     }
 }
