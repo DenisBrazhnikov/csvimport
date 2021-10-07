@@ -13,11 +13,11 @@ class DBImport
         $this->strategies[] = $strategy;
     }
 
-    public function insert(string $type, array $rows): ImportResult
+    public function insert(string $type, string $table, array $rows, array $columns, callable $rowCallback = null): ImportResult
     {
         foreach ($this->strategies as $strategy) {
             if ($strategy->canInsert($type)) {
-                return $strategy->insert($rows);
+                return $strategy->insert($table, $rows, $columns, $rowCallback);
             }
         }
     }

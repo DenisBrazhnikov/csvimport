@@ -16,6 +16,7 @@ use Symfony\Component\Validator\Constraints as Assert;
 use App\Service\CsvImport\CsvParser;
 use App\Service\CsvImport\RowsValidator;
 use App\Service\CsvImport\Strategy\DBImport;
+use App\Service\CsvImport\Strategy\DBRawFunction;
 
 use Symfony\Component\Stopwatch\Stopwatch;
 
@@ -115,7 +116,23 @@ class CsvImport extends Command
             
             $io->section('Inserting valid data to database...');
 
-            $importResult = $this->dbImport->insert('each', $validatorResult->getValidRows());
+            $importResult = $this->dbImport->insert(
+                'batch', 
+                'tblProductData',
+                $validatorResult->getValidRows(), [
+                    'strProductCode' => 'Product Code',
+                    'strProductName' => 'Product Name',
+                    'strProductDesc' => 'Product Description',
+                    'intStock' => 'Stock',
+                    'decCost' => 'Cost in GBP',
+                    'dtmAdded' => 'Date Added',
+                    'dtmDiscontinued' => 'Discontinued'
+                ], function($row) {
+                $row['Date Added'] = new DBRawFunction('NOW()');
+                $row['Discontinued'] = $row['Discontinued'] ? new DBRawFunction('NOW()') : null;
+
+                return $row;
+            });
 
             $io->success('Data has been inserted/updated to database');
 

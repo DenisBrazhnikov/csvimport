@@ -9,11 +9,35 @@ use App\Service\CsvImport\ImportResult;
 
 class DBStrategyEachInsert implements DBImportStrategyInterface
 {
-    private $em;
+    private $connection;
+
+    private $statement = '(
+        strProductCode,
+        strProductName,
+        strProductDesc,
+        intStock,
+        decCost,
+        dtmAdded,
+        dtmDiscontinued
+    ) VALUES (
+        :code,
+        :name,
+        :description,
+        :stock,
+        :cost,
+        NOW(),
+        :discontinued_at
+    ) ON DUPLICATE KEY UPDATE
+        strProductName = :name,
+        strProductDesc = :description,
+        intStock = :stock,
+        decCost = :cost,
+        dtmDiscontinued = :discontinued_at
+    ';
 
     public function __construct(EntityManagerInterface $em)
     {
-        $this->em = $em;
+        $this->connection = $em->getConnection();
     }
 
     private $type = 'each';
@@ -23,48 +47,48 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
         return $this->type === $type;
     }
 
-    public function insert(array $rows): ImportResult
+    public function insert(string $table, array $rows, array $columns, callable $rowCallback = null): ImportResult
     {
-        $connection = $this->em->getConnection();
-
-        $statement = $connection->prepare('INSERT INGORE INTO tblProductData (
-            strProductCode,
-            strProductName,
-            strProductDesc,
-            intStock,
-            decCost,
-            dtmAdded,
-            dtmDiscontinued
-        ) VALUES (
-            :code,
-            :name,
-            :description,
-            :stock,
-            :cost,
-            NOW(),
-            :discontinued_at
-        ) ON DUPLICATE KEY UPDATE
-            strProductName = :name,
-            strProductDesc = :description,
-            intStock = :stock,
-            decCost = :cost,
-            dtmDiscontinued = :discontinued_at
-        ');
-
         $failedRows = [];
 
         foreach($rows as $row) {
+            $rowsSQL = [];
+            $bindings = [];
+            $params = [];
+
+            if($rowCallback)
+                $row = $rowCallback($row);
+
+            foreach($columns as $column => $valueKey){
+                if($row[$valueKey] instanceof DBRawFunction) {
+                    $params[] = $row[$valueKey];
+                } else {
+                    $param = ':' . md5($column);
+                    $params[] = $param;
+
+                    $bindings[$param] = $row[$valueKey]; 
+                }
+            }
+
+            $rowsSQL[] = '(' . implode(', ', $params) . ')';
+
+            $sql = 
+            'INSERT INTO ' . $table . ' (' . implode(', ', array_keys($columns)) . ')
+            VALUES ' .implode(', ', $rowsSQL) . ' AS new
+            ON DUPLICATE KEY UPDATE
+            strProductName = new.strProductName,
+            strProductDesc = new.strProductDesc,
+            intStock = new.intStock,
+            decCost = new.decCost';
+
+            $statement = $this->connection->prepare($sql);
+
+            foreach($bindings as $param => $val){
+                $statement->bindValue($param, $val);
+            }
+
             try {
-                $statement->bindValue(':code', $row['Product Code']);
-                $statement->bindValue(':name', $row['Product Name']);
-                $statement->bindValue(':description', $row['Product Description']);
-                $statement->bindValue(':stock', $row['Stock']);
-                $statement->bindValue(':cost', $row['Cost in GBP']);
-
-                // Set current datetime if the row is discontinued
-                $statement->bindValue(':discontinued_at', $row['Discontinued'] ? date('Y-m-d H:i:s') : NULL);
-
-                $statement->execute();
+                $statement->execute();   
             } catch (\Exception $e) {
                 $failedRows[] = $row;
             }
