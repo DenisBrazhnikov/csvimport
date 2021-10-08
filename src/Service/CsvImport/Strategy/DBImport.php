@@ -19,12 +19,13 @@ class DBImport
         array $rows, 
         array $columns, 
         array $updateColumns = null, 
-        callable $rowCallback = null
+        callable $rowCallback = null,
+        int $batchSize
         ): ImportResult
     {
         foreach ($this->strategies as $strategy) {
             if ($strategy->canInsert($type)) {
-                return $strategy->insert($table, $rows, $columns, $updateColumns, $rowCallback);
+                return $strategy->insert($table, $rows, $columns, $updateColumns, $rowCallback, $batchSize);
             }
         }
     }

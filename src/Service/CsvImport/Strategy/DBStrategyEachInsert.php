@@ -52,7 +52,8 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
         array $rows, 
         array $columns, 
         array $updateColumns = null, 
-        callable $rowCallback = null
+        callable $rowCallback = null,
+        int $batchSize
         ): ImportResult
     {
         $failedRows = [];

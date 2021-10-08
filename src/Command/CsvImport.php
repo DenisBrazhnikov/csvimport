@@ -106,13 +106,10 @@ class CsvImport extends Command
                 'tblProductData',
                 $validatorResult->getValidRows(),
                 $this->getColumns(), 
-                $this->getUpdateColumns()
-                , function($row) {
-                $row['Date Added'] = new DBRawFunction('NOW()');
-                $row['Discontinued'] = $row['Discontinued'] ? new DBRawFunction('NOW()') : null;
-
-                return $row;
-            });
+                $this->getUpdateColumns(),
+                $this->getPrePorcessCallable(),
+                50
+            );
 
             $io->success('Data has been inserted/updated to database');
 
@@ -197,5 +194,15 @@ class CsvImport extends Command
             'Stock',
             'Cost in GBP'
         ];
+    }
+
+    private function getPrePorcessCallable(): callable
+    {
+        return (function($row) {
+            $row['Date Added'] = new DBRawFunction('NOW()');
+            $row['Discontinued'] = $row['Discontinued'] ? new DBRawFunction('NOW()') : null;
+
+            return $row;
+        });
     }
 }
