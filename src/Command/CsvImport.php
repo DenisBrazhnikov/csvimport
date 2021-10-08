@@ -42,7 +42,8 @@ class CsvImport extends Command
     protected function configure(): void
     {
         $this->addArgument('file', InputArgument::REQUIRED, 'CSV file path');
-        $this->addOption('execute', null, InputOption::VALUE_NONE, 'Perform SQL insert validated data');
+        $this->addOption('execute', NULL, InputOption::VALUE_NONE, 'Perform SQL insert validated data');
+        $this->addOption('strategy', 's', InputOption::VALUE_REQUIRED, 'SQL insert strategy "batch" (default) or "each"', 'batch');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -74,15 +75,7 @@ class CsvImport extends Command
 
         $headers = array_keys($this->rowValidationRules());
 
-        $validatorResult = $this->rowsValidator->validate($rows, $this->rowValidationRules(), function ($row) {
-            if($row['Cost in GBP'] < 5 && $row['Stock'] < 10)
-                return true;
-    
-            if($row['Cost in GBP'] >= 1000)
-                return true;
-    
-            return false;
-        });
+        $validatorResult = $this->rowsValidator->validate($rows, $this->rowValidationRules(), $this->rowFilterCallback());
 
         $io->text('Rows processed: ' . $validatorResult->getRowsProcessedCount());
         $io->text('Valid rows: ' . $validatorResult->getValidRowsCount());
@@ -106,33 +99,14 @@ class CsvImport extends Command
         }
 
         if ($input->getOption('execute')) {
-            try {
-                $this->migrate($output);
-            } catch (Exception $e) {
-                $io->caution('Migration has failed.');
-
-                return Command::FAILURE;
-            }
-            
             $io->section('Inserting valid data to database...');
 
             $importResult = $this->dbImport->insert(
-                'each', 
+                $input->getOption('strategy'), 
                 'tblProductData',
-                $validatorResult->getValidRows(), [
-                    'Product Code' => 'strProductCode',
-                    'Product Name' => 'strProductName',
-                    'Product Description' => 'strProductDesc',
-                    'Stock' => 'intStock',
-                    'Cost in GBP' => 'decCost',
-                    'Date Added' => 'dtmAdded',
-                    'Discontinued' => 'dtmDiscontinued'
-                ], [
-                    'Product Name',
-                    'Product Description',
-                    'Stock',
-                    'Cost in GBP'
-                ]
+                $validatorResult->getValidRows(),
+                $this->getColumns(), 
+                $this->getUpdateColumns()
                 , function($row) {
                 $row['Date Added'] = new DBRawFunction('NOW()');
                 $row['Discontinued'] = $row['Discontinued'] ? new DBRawFunction('NOW()') : null;
@@ -151,20 +125,6 @@ class CsvImport extends Command
         $io->text($stopwatch->stop('start'));
 
         return Command::SUCCESS;
-    }
-
-    /**
-     * Migrate Stock and Cost columns
-     * @param OutputInterface $output
-     * @return void
-     */
-    private function migrate(OutputInterface $output): void
-    {
-        $input = new ArrayInput([]);
-        $input->setInteractive(false);
-
-        $command = $this->getApplication()->find('doctrine:migrations:migrate');
-        $command->run($input, $output);
     }
 
     /**
@@ -200,6 +160,42 @@ class CsvImport extends Command
                 new Assert\Positive()
             ], 
             'Discontinued' => new Assert\Choice(['yes', '']),
+        ];
+    }
+
+    private function rowFilterCallback(): callable
+    {
+        return (function ($row) {
+            if($row['Cost in GBP'] < 5 && $row['Stock'] < 10)
+                return true;
+    
+            if($row['Cost in GBP'] >= 1000)
+                return true;
+    
+            return false;
+        });
+    }
+
+    private function getColumns(): array
+    {
+        return [
+            'Product Code' => 'strProductCode',
+            'Product Name' => 'strProductName',
+            'Product Description' => 'strProductDesc',
+            'Stock' => 'intStock',
+            'Cost in GBP' => 'decCost',
+            'Date Added' => 'dtmAdded',
+            'Discontinued' => 'dtmDiscontinued'
+        ];
+    }
+
+    private function getUpdateColumns(): array
+    {
+        return [
+            'Product Name',
+            'Product Description',
+            'Stock',
+            'Cost in GBP'
         ];
     }
 }
