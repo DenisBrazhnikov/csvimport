@@ -7,5 +7,5 @@ interface DBImportStrategyInterface
     public const SERVICE_TAG = 'db_insert_strategy';
 
     public function canInsert(string $type);
-    public function insert(string $table, array $rows, array $columns, callable $rowCallable);
+    public function insert(string $table, array $rows, array $columns, array $updateColumns, callable $rowCallable);
 }

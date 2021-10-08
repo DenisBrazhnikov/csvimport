@@ -26,22 +26,36 @@ class DBStrategyBatchInsert implements DBImportStrategyInterface
         return $this->type === $type;
     }
 
-    public function insert(string $table, array $rows, array $columns, $rowCallback = null): ImportResult
+    public function insert(
+        string $table, 
+        array $rows, 
+        array $columns, 
+        array $updateColumns = null, 
+        $rowCallback = null
+        ): ImportResult
     {
-        foreach(array_chunk($rows, $this->batchSize) as $chunk) {
-            $this->batch($table, $chunk, $columns, $rowCallback);
+        $failedRows = [];
 
-            $stm = $this->connection->query('SHOW WARNINGS');
-            //var_dump($stm->fetchAll());
+        foreach(array_chunk($rows, $this->batchSize) as $chunk) {
+            $this->batch($table, $chunk, $columns, $updateColumns, $rowCallback);
+
+            $failedRowKeys = $this->catchFailedRowKeys();
+
+            if(count($failedRowKeys)) {
+                $failedChunkRows = array_intersect_key($chunk, array_fill_keys($failedRowKeys, true));
+                $failedRows = array_merge($failedRows, $failedChunkRows);
+            }
         }
 
-        return new ImportResult([]);
+        return new ImportResult($failedRows);
     }
 
-    private function batch($table, $rows, array $columns, callable $rowCallback = null)
+    private function batch($table, $rows, array $columns, array $updateColumns, callable $rowCallback = null)
     {
-        $rowsSQL = [];
+        $bindValues = [];
         $bindings = [];
+
+        $updateColumns = array_intersect_key($columns, array_fill_keys($updateColumns, true));
     
         foreach($rows as $key => $row){
             $params = [];
@@ -49,7 +63,7 @@ class DBStrategyBatchInsert implements DBImportStrategyInterface
             if($rowCallback)
                 $row = $rowCallback($row);
 
-            foreach($columns as $column => $valueKey){
+            foreach($columns as $valueKey => $column){
                 if($row[$valueKey] instanceof DBRawFunction) {
                     $params[] = $row[$valueKey] ;
                 } else {
@@ -60,18 +74,15 @@ class DBStrategyBatchInsert implements DBImportStrategyInterface
                 }
             }
 
-            $rowsSQL[] = '(' . implode(', ', $params) . ')';
+            $bindValues[] = '(' . implode(', ', $params) . ')';
         }
 
         $sql = 
         'INSERT IGNORE INTO '. $table .
-        ' (' . implode(', ', array_keys($columns)) . ') VALUES ' .
-        implode(', ', $rowsSQL) .
-        ' AS new ON DUPLICATE KEY UPDATE
-        strProductName = new.strProductName,
-        strProductDesc = new.strProductDesc,
-        intStock = new.intStock,
-        decCost = new.decCost';
+        ' (' . implode(', ', $columns) . ') VALUES ' .implode(', ', $bindValues) .
+        ' AS new ON DUPLICATE KEY UPDATE ' . implode(', ', array_map(function($column) {
+            return $column . ' = new.' . $column;
+        }, $updateColumns));
 
         $statement = $this->connection->prepare($sql);
 
@@ -79,6 +90,26 @@ class DBStrategyBatchInsert implements DBImportStrategyInterface
             $statement->bindValue($param, $val);
         }
         
-        return $statement->execute();
+        $statement->execute();
+    }
+
+    private function catchFailedRowKeys(): array
+    {
+        $keys = [];
+
+        $warnings = $this->connection->query('SHOW WARNINGS')->fetchAll();
+        
+        foreach($warnings as $warning) {
+            if(isset($warning['Message'])) {
+                $message = $warning['Message'];
+                $messageParts = explode('\' at row ', $message);
+
+                $key = (int)end($messageParts) - 1;
+
+                $keys[] = $key;
+            }
+        }
+
+        return array_unique($keys);
     }
 }

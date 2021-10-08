@@ -47,19 +47,29 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
         return $this->type === $type;
     }
 
-    public function insert(string $table, array $rows, array $columns, callable $rowCallback = null): ImportResult
+    public function insert(
+        string $table, 
+        array $rows, 
+        array $columns, 
+        array $updateColumns = null, 
+        callable $rowCallback = null
+        ): ImportResult
     {
         $failedRows = [];
 
+        $updateColumns = array_intersect_key($columns, array_fill_keys($updateColumns, true));
+
         foreach($rows as $row) {
-            $rowsSQL = [];
+            $bindValues = [];
             $bindings = [];
             $params = [];
 
-            if($rowCallback)
+            if($rowCallback) {
+                $originalRow = $row;
                 $row = $rowCallback($row);
+            }
 
-            foreach($columns as $column => $valueKey){
+            foreach($columns as $valueKey => $column){
                 if($row[$valueKey] instanceof DBRawFunction) {
                     $params[] = $row[$valueKey];
                 } else {
@@ -70,27 +80,25 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
                 }
             }
 
-            $rowsSQL[] = '(' . implode(', ', $params) . ')';
+            $bindValues[] = '(' . implode(', ', $params) . ')';
 
             $sql = 
-            'INSERT INTO ' . $table . ' (' . implode(', ', array_keys($columns)) . ')
-            VALUES ' .implode(', ', $rowsSQL) . ' AS new
-            ON DUPLICATE KEY UPDATE
-            strProductName = new.strProductName,
-            strProductDesc = new.strProductDesc,
-            intStock = new.intStock,
-            decCost = new.decCost';
+            'INSERT INTO ' . $table .
+            '(' . implode(', ', $columns) . ') VALUES ' .implode(', ', $bindValues) .
+            ' AS new ON DUPLICATE KEY UPDATE ' . implode(', ', array_map(function($column) {
+                return $column . ' = new.' . $column;
+            }, $updateColumns));
 
             $statement = $this->connection->prepare($sql);
 
             foreach($bindings as $param => $val){
                 $statement->bindValue($param, $val);
             }
-
+            
             try {
-                $statement->execute();   
+                $statement->execute();  
             } catch (\Exception $e) {
-                $failedRows[] = $row;
+                $failedRows[] = isset($originalRow) ? $originalRow : $row;
             }
         }
 

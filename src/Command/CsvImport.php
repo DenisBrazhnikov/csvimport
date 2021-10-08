@@ -117,17 +117,23 @@ class CsvImport extends Command
             $io->section('Inserting valid data to database...');
 
             $importResult = $this->dbImport->insert(
-                'batch', 
+                'each', 
                 'tblProductData',
                 $validatorResult->getValidRows(), [
-                    'strProductCode' => 'Product Code',
-                    'strProductName' => 'Product Name',
-                    'strProductDesc' => 'Product Description',
-                    'intStock' => 'Stock',
-                    'decCost' => 'Cost in GBP',
-                    'dtmAdded' => 'Date Added',
-                    'dtmDiscontinued' => 'Discontinued'
-                ], function($row) {
+                    'Product Code' => 'strProductCode',
+                    'Product Name' => 'strProductName',
+                    'Product Description' => 'strProductDesc',
+                    'Stock' => 'intStock',
+                    'Cost in GBP' => 'decCost',
+                    'Date Added' => 'dtmAdded',
+                    'Discontinued' => 'dtmDiscontinued'
+                ], [
+                    'Product Name',
+                    'Product Description',
+                    'Stock',
+                    'Cost in GBP'
+                ]
+                , function($row) {
                 $row['Date Added'] = new DBRawFunction('NOW()');
                 $row['Discontinued'] = $row['Discontinued'] ? new DBRawFunction('NOW()') : null;
 
