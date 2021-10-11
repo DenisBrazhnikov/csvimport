@@ -99,7 +99,7 @@ class CsvImport extends Command
         }
 
         if ($input->getOption('execute')) {
-            $io->section('Inserting valid data to database...');
+            $io->section('Inserting valid data to database via "'. $input->getOption('strategy') . '" strategy');
 
             $importResult = $this->dbImport->insert(
                 $input->getOption('strategy'), 
