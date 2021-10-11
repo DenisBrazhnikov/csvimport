@@ -128,7 +128,6 @@ class CsvImportTest extends KernelTestcase
 
         $output = $tester->getDisplay();
 
-        $this->assertStringContainsString('DoctrineMigrations', $output);
         $this->assertStringContainsString('Inserting', $output);
         $this->assertStringContainsString('Data has been inserted', $output);
         $this->assertStringNotContainsString('Failed rows', $output);
