@@ -117,7 +117,7 @@ class CsvImportTest extends KernelTestcase
         $this->assertStringNotContainsString('Inserting', $output);
     }
 
-    public function testItCanInsertDataToDatabase()
+    public function testItCanInsertDataToDatabaseViaDefaultStrategy()
     {
         $tester = new CommandTester($this->command);
 
@@ -128,6 +128,25 @@ class CsvImportTest extends KernelTestcase
 
         $output = $tester->getDisplay();
 
+        $this->assertStringContainsString('via "batch" strategy', $output);
+        $this->assertStringContainsString('Inserting', $output);
+        $this->assertStringContainsString('Data has been inserted', $output);
+        $this->assertStringNotContainsString('Failed rows', $output);
+    }
+
+    public function testItCanInsertDataToDatabaseViaEachStrategy()
+    {
+        $tester = new CommandTester($this->command);
+
+        $tester->execute([
+            'file' => $this->createTestCsvFile(),
+            '--execute' => true,
+            '--strategy' => 'each'
+        ]);
+
+        $output = $tester->getDisplay();
+
+        $this->assertStringContainsString('via "each" strategy', $output);
         $this->assertStringContainsString('Inserting', $output);
         $this->assertStringContainsString('Data has been inserted', $output);
         $this->assertStringNotContainsString('Failed rows', $output);
