@@ -22,7 +22,7 @@ use Symfony\Component\Stopwatch\Stopwatch;
 
 #[AsCommand(
     name: 'app:import',
-    description: 'Import stock.csv file. Use --execute flag to perform database import',
+    description: 'CSV file to database importer',
 )]
 class CsvImport extends Command
 {
