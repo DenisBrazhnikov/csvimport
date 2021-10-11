@@ -69,9 +69,9 @@ class DBStrategyBatchInsert implements DBImportStrategyInterface
      */
     private function batch($table, $rows, array $columns, array $updateColumns, callable $rowCallback = null)
     {
-        // Here we'll contain an array of () values for MySQL insert query
+        // here we'll contain an array of () values for MySQL insert query
         $bindValues = [];
-        // here we'll contain an array placeholders for pdo statement
+        // here we'll contain an array of placeholders for PDO statement
         $bindings = [];
 
         // intersecting columns from CSV to columns in table
@@ -92,12 +92,12 @@ class DBStrategyBatchInsert implements DBImportStrategyInterface
                     $param = ':' . md5($column) . $key;
                     $params[] = $param;
 
-                    // saving correspondence between placeholder and CSV row value
+                    // saving correspondence between placeholders and CSV row values
                     $bindings[$param] = $row[$valueKey] ; 
                 }
             }
 
-            // save SQL compatible INSERT VALUES part to array
+            // adding bracket-wrapped, comma-separated placeholders
             $bindValues[] = '(' . implode(', ', $params) . ')';
         }
 

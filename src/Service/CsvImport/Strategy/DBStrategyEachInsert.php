@@ -11,30 +11,6 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
 {
     private $connection;
 
-    private $statement = '(
-        strProductCode,
-        strProductName,
-        strProductDesc,
-        intStock,
-        decCost,
-        dtmAdded,
-        dtmDiscontinued
-    ) VALUES (
-        :code,
-        :name,
-        :description,
-        :stock,
-        :cost,
-        NOW(),
-        :discontinued_at
-    ) ON DUPLICATE KEY UPDATE
-        strProductName = :name,
-        strProductDesc = :description,
-        intStock = :stock,
-        decCost = :cost,
-        dtmDiscontinued = :discontinued_at
-    ';
-
     public function __construct(EntityManagerInterface $em)
     {
         $this->connection = $em->getConnection();
@@ -47,6 +23,15 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
         return $this->type === $type;
     }
 
+    /**
+     * Insert all of the rows each by each
+     * @param string $table Table name
+     * @param array $rows Array of rows
+     * @param array $columns Array of CSV columns(keys) corresponding table columns(values)
+     * @param array $updateColumns Array of CSV columns which will be updated in table ON DUPLICATE
+     * @param callable $rowCallback A callable to pre-process row before insertion
+     * @param int $batchSize Batch size
+     */
     public function insert(
         string $table, 
         array $rows, 
@@ -61,8 +46,11 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
         $updateColumns = array_intersect_key($columns, array_fill_keys($updateColumns, true));
 
         foreach($rows as $row) {
+            // here we'll contain an array of () values for MySQL insert query
             $bindValues = [];
+            // here we'll contain an array of placeholders for PDO statement
             $bindings = [];
+            // here we'll contain an array of row values to wrap them by brackets and add to $bindValues
             $params = [];
 
             if($rowCallback) {
@@ -74,13 +62,16 @@ class DBStrategyEachInsert implements DBImportStrategyInterface
                 if($row[$valueKey] instanceof DBRawFunction) {
                     $params[] = $row[$valueKey];
                 } else {
+                    // build character-safe for MySQL statemenet placeholder
                     $param = ':' . md5($column);
                     $params[] = $param;
 
+                    // saving correspondence between placeholders and CSV row values
                     $bindings[$param] = $row[$valueKey]; 
                 }
             }
 
+            // adding bracket-wrapped, comma-separated placeholders
             $bindValues[] = '(' . implode(', ', $params) . ')';
 
             $sql = 
